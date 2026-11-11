@@ -26,12 +26,16 @@ jobs:
         run: |
           REPO=${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            echo "tags=${REPO}:${GITHUB_REF_NAME},${REPO}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            # по тегу: только версионный тег
+            echo "tags=${REPO}:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            echo "tags=${REPO}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+            # по коммиту: дата + короткий sha, как в README (20241217-abc123)
+            DATE=$(date +%Y%m%d)
+            SHORT_SHA=${GITHUB_SHA:0:6}
+            echo "tags=${REPO}:${DATE}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build and push (одна сборка, теги по контексту)
+      - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
