@@ -32,10 +32,10 @@ git push origin v1.0.1
 3. Коммит с тегом (альтернативный способ):  
 
 ```
-git commit -am "release v1.0.2"
-git tag v1.0.2
+git commit -am "release v1.0.3"
+git tag v1.0.3
 git push origin main --tags
 ```  
 При пуше в main запустится build-and-push с SHA-тегом  
 
-При пуше тега v1.0.2 запустится build-and-push и deploy с версионным тегом  
+При пуше тега v1.0.3 запустится build-and-push и deploy с версионным тегом  
