@@ -1,0 +1,76 @@
+name: CI/CD for Test App
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v5
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Build and push (sha tag, на каждый коммит)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app:${{ github.sha }}
+
+      - name: Build and push (версионный тег, только по тегу)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app:${{ github.ref_name }}
+
+  deploy:
+    needs: build-and-push
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: "v1.30.0"
+
+      - name: Configure Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Deploy new image
+        run: |
+          IMAGE_TAG=${{ github.ref_name }}
+          echo "Deploying image with tag: $IMAGE_TAG"
+          kubectl set image deployment/devops-diplom-app \
+            devops-diplom-app=${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app:$IMAGE_TAG \
+            --namespace app
+          kubectl rollout status deployment/devops-diplom-app \
+            --namespace app --timeout=120s
+
+      - name: Smoke test
+        run: |
+          kubectl get pods -n app -o wide
+          NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
+          for i in $(seq 1 10); do
+            if curl -sf "http://$NODE_IP/"; then echo "Smoke test OK"; exit 0; fi
+            echo "retry $i/10"; sleep 5
+          done
+          exit 1
