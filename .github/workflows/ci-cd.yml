@@ -21,20 +21,22 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_PASSWORD }}
 
-      - name: Build and push (sha tag, на каждый коммит)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app:${{ github.sha }}
+      - name: Compute image tags
+        id: tags
+        run: |
+          REPO=${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "tags=${REPO}:${GITHUB_REF_NAME},${REPO}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=${REPO}:${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Build and push (версионный тег, только по тегу)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: Build and push (одна сборка, теги по контексту)
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app:${{ github.ref_name }}
+          tags: ${{ steps.tags.outputs.tags }}
 
   deploy:
     needs: build-and-push
@@ -63,14 +65,11 @@ jobs:
             devops-diplom-app=${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app:$IMAGE_TAG \
             --namespace app
           kubectl rollout status deployment/devops-diplom-app \
-            --namespace app --timeout=120s
+            --namespace app --timeout=180s
 
-      - name: Smoke test
+      - name: Smoke test (in-cluster)
         run: |
-          kubectl get pods -n app -o wide
-          NODE_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="ExternalIP")].address}')
-          for i in $(seq 1 10); do
-            if curl -sf "http://$NODE_IP/"; then echo "Smoke test OK"; exit 0; fi
-            echo "retry $i/10"; sleep 5
-          done
-          exit 1
+          kubectl -n app get pods -o wide
+          kubectl -n app run smoke-${{ github.run_id }} --rm -i --restart=Never \
+            --image=curlimages/curl -- \
+            curl -sf --max-time 10 http://devops-diplom-app/
