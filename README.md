@@ -33,7 +33,7 @@ git push origin main
 
 ![Образ в DockerHub](img/003.png)
 
-**Deploy НЕ запускается**  
+`deploy` - НЕ запускается  
 
 **2.** Создание тега:  
 
