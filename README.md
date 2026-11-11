@@ -7,7 +7,7 @@ GitHub Actions. В файле [ci-cd.yaml](.github/workflows/ci-cd.yaml) нас�
 ### Как это работает:
 1. Коммит в ветку main (без тега):
 ```bash
-git commit -am "added README.MD"
+git commit -am "added README.md"
 git push origin main
 ```  
 Запускается только build-and-push  
