@@ -5,6 +5,9 @@ on:
     branches: [main]
     tags: ["v*"]
 
+permissions:
+  contents: read
+
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
@@ -29,7 +32,7 @@ jobs:
             # по тегу: только версионный тег
             echo "tags=${REPO}:${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           else
-            # по коммиту: дата + короткий sha, как в README (20241217-abc123)
+            # по коммиту: дата + короткий sha (20261112-abc123)
             DATE=$(date +%Y%m%d)
             SHORT_SHA=${GITHUB_SHA:0:6}
             echo "tags=${REPO}:${DATE}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
@@ -46,9 +49,20 @@ jobs:
     needs: build-and-push
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-app
+      cancel-in-progress: false
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Checkout infra repo
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.INFRA_REPO }}
+          ref: main
+          path: infra
+          token: ${{ secrets.INFRA_REPO_TOKEN }}
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
@@ -61,19 +75,24 @@ jobs:
           echo "${{ secrets.KUBE_CONFIG }}" > ~/.kube/config
           chmod 600 ~/.kube/config
 
-      - name: Deploy new image
+      - name: Deploy manifests
         run: |
-          IMAGE_TAG=${{ github.ref_name }}
-          echo "Deploying image with tag: $IMAGE_TAG"
-          kubectl set image deployment/devops-diplom-app \
-            devops-diplom-app=${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app:$IMAGE_TAG \
-            --namespace app
-          kubectl rollout status deployment/devops-diplom-app \
-            --namespace app --timeout=180s
+          IMAGE="${{ secrets.DOCKERHUB_USERNAME }}/devops-diplom-app:${{ github.ref_name }}"
+          sed "s|APP_IMAGE|${IMAGE}|g" infra/k8s-config/app/manifests.yaml > /tmp/manifests.yaml
+          kubectl apply -f /tmp/manifests.yaml
+          kubectl rollout status deployment/devops-diplom-app -n app --timeout=180s
 
       - name: Smoke test (in-cluster)
         run: |
           kubectl -n app get pods -o wide
-          kubectl -n app run smoke-${{ github.run_id }} --rm -i --restart=Never \
-            --image=curlimages/curl -- \
-            curl -sf --max-time 10 http://devops-diplom-app/
+          # ИЗМЕНЕНО: ретраи — сразу после прерывания ноды под может
+          # ещё подниматься на второй ноде
+          for i in 1 2 3; do
+            if kubectl -n app run smoke-${{ github.run_id }} --rm -i --restart=Never \
+                 --image=curlimages/curl -- \
+                 curl -sf --max-time 10 http://devops-diplom-app/; then
+              exit 0
+            fi
+            echo "попытка $i не удалась, повтор через 15 с"; sleep 15
+          done
+          exit 1
